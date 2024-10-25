@@ -1,0 +1,59 @@
+# file: gcphosts
+# for GCP tenant hosts file
+
+# Modify the line with the ansible_host for the public IP address of your Tenant
+# For that, un-comment the following line before running instances configuration
+balancer        ansible_host=34.116.237.107 ansible_user=ubuntu ansible_connection=ssh
+vuecalc1        ansible_host=34.116.255.30 ansible_user=ubuntu ansible_connection=ssh
+expressed1      ansible_host=34.116.197.119 ansible_user=ubuntu ansible_connection=ssh
+expressed2      ansible_host=34.116.154.164 ansible_user=ubuntu ansible_connection=ssh
+happy1          ansible_host=34.116.135.155 ansible_user=ubuntu ansible_connection=ssh
+happy2          ansible_host=34.116.228.65 ansible_user=ubuntu ansible_connection=ssh
+bootstorage1    ansible_host=34.116.169.114 ansible_user=ubuntu ansible_connection=ssh
+bootstorage2    ansible_host=35.205.131.106 ansible_user=ubuntu ansible_connection=ssh
+mongodb1        ansible_host=34.116.196.45 ansible_user=ubuntu ansible_connection=ssh
+prometheus1     ansible_host=35.190.192.52 ansible_user=ubuntu ansible_connection=ssh
+
+
+# The local deployment host VM
+[osmgmt]
+localhost           ansible_connection=local
+
+# Contains the vuecalc servers
+[vuecalc]
+vuecalc1
+
+# Contains the expressed servers
+[expressed]
+expressed1
+expressed2
+
+# Contains the happy servers
+[happy]
+happy1
+happy2
+
+[bootstorage]
+bootstorage1
+bootstorage2
+
+[mongodb]
+mongodb1
+
+[loadbal]
+balancer
+
+[prometheus]
+prometheus1
+
+[targets]
+balancer
+vuecalc1
+expressed1
+expressed2
+happy1
+happy2
+bootstorage1
+bootstorage2
+mongodb1
+prometheus1

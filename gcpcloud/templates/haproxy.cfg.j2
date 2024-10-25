@@ -1,0 +1,103 @@
+# {{ ansible_managed }}
+
+#---------------------------------------------------------------------
+# Global settings
+#---------------------------------------------------------------------
+global
+  log /dev/log  local0
+  log /dev/log  local1 notice
+  chroot        /var/lib/haproxy
+  stats socket  /var/lib/haproxy/stats level admin
+  user root
+  group root
+  daemon
+
+#---------------------------------------------------------------------
+# Default settings applied to all frontend and backend sections
+#---------------------------------------------------------------------
+defaults
+  log    global
+  mode   http
+  option httplog
+  option dontlognull
+  option forwardfor except 127.0.0.0/8
+  option redispatch
+  retries 3
+  timeout http-request    5s
+  timeout queue           1m
+  timeout http-keep-alive 5s
+  timeout check           10s
+  timeout connect  5000
+  timeout client   50000
+  timeout server   50000
+  errorfile 400 /etc/haproxy/errors/400.http
+  errorfile 403 /etc/haproxy/errors/403.http
+  errorfile 408 /etc/haproxy/errors/408.http
+  errorfile 500 /etc/haproxy/errors/500.http
+  errorfile 502 /etc/haproxy/errors/502.http
+  errorfile 503 /etc/haproxy/errors/503.http
+  errorfile 504 /etc/haproxy/errors/504.http
+
+#---------------------------------------------------------------------
+# Frontend Configuration (Listen on Port 80)
+#---------------------------------------------------------------------
+frontend hafrontend
+  bind *:80
+  mode http
+
+  # ACLs for different request paths
+  acl is_add path_beg /api/express/add
+  acl is_subtract path_beg /api/express/subtract
+  acl is_multiply path_beg /api/happy/multiply
+  acl is_divide path_beg /api/happy/divide
+  acl is_modulos path_beg /api/happy/modulos
+  acl is_bootstorage path_beg /api/bootstorage
+
+  # Routing logic based on operation type
+  use_backend expressed_backend if is_add or is_subtract
+  use_backend happy_backend if is_multiply or is_divide or is_modulos
+  use_backend bootstorage_backend if is_bootstorage
+
+  # Default backend (just in case)
+  default_backend expressed_backend
+
+#---------------------------------------------------------------------
+# BackEnd for Expressed (Addition & Subtraction)
+#---------------------------------------------------------------------
+backend expressed_backend
+  mode http
+  balance roundrobin
+  option httpchk GET /api/express/healthz
+  server expressed1 34.116.197.119:3000 check
+  server expressed2 34.116.154.164:3000 check
+
+#---------------------------------------------------------------------
+# BackEnd for Happy (Multiplication, Division, Modulo)
+#---------------------------------------------------------------------
+backend happy_backend
+  mode http
+  balance roundrobin
+  option httpchk GET /api/happy/healthz
+  server happy1 34.116.135.155:4000 check
+  server happy2 34.116.228.65:4000 check
+
+#---------------------------------------------------------------------
+# BackEnd for Bootstorage (CRUD Operations)
+#---------------------------------------------------------------------
+backend bootstorage_backend
+  mode http
+  balance roundrobin
+  option httpchk GET /api/bootstorage/healthz
+  server bootstorage1 34.116.169.114:5000 check
+  server bootstorage2 35.205.131.106:5000 check
+
+#---------------------------------------------------------------------
+# HAProxy Monitoring Config URI
+#---------------------------------------------------------------------
+listen stats
+  bind *:8080
+  stats enable
+  stats uri /haproxy?stats
+  stats realm Haproxy\ Statistics
+  stats auth admin:agisit24-g9
+  stats refresh 10s

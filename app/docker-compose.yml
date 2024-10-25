@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  vuecalc:
+    build:
+      context: /vuecalc
+      dockerfile: Dockerfile  # Dockerfile for vuecalc
+    ports:
+      - "2000:2000"  # Expose port 2000 for vuecalc
+    networks:
+      - app-network
+
+  expressed:
+    build:
+      context: /expressed
+      dockerfile: Dockerfile  # Dockerfile for expressed
+    ports:
+      - "3000:3000"  # Expose port 3000 for expressed service
+    networks:
+      - app-network
+    depends_on:
+      - vuecalc  # Express service starts after vuecalc
+
+  happy:
+    build:
+      context: happy
+      dockerfile: Dockerfile  # Dockerfile for the happy service
+    ports:
+      - "4000:4000"  # Expose port 4000 for happy (multiply and divide)
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge

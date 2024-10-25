@@ -1,0 +1,29 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: 'expressed1'
+    static_configs:
+      - targets: ['34.116.197.119:3000']
+
+  - job_name: 'expressed2'
+    static_configs:
+      - targets: ['34.116.154.164:3000']
+
+  - job_name: 'happy1'
+    static_configs:
+      - targets: ['34.116.135.155:4000']
+
+  - job_name: 'happy2'
+    static_configs:
+      - targets: ['34.116.228.65:4000']
+
+  - job_name: 'bootstorage1'
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ['34.116.169.114:5000']
+
+  - job_name: 'bootstorage2'
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ['35.205.131.106:5000']

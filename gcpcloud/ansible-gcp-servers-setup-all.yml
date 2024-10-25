@@ -1,0 +1,615 @@
+---
+# file: ansible-gcp-servers-setup-all.yml
+
+# First Play: Critical configuration on all servers
+- hosts: targets
+  gather_facts: no
+  remote_user: ubuntu
+  become: yes
+  become_method: sudo
+
+  pre_tasks:
+    - name: Remove require tty - alt
+      lineinfile:
+        regexp: "requiretty"
+        dest: /etc/sudoers.d/os_defaults
+        state: absent
+
+    - name: Validate the sudoers file before saving not to require password
+      lineinfile:
+        dest: /etc/sudoers
+        state: present
+        regexp: '^%ADMIN ALL='
+        line: '%ADMIN ALL=(ALL) NOPASSWD: ALL'
+        validate: /usr/sbin/visudo -cf %s
+
+    - name: Install SSH key on servers
+      authorized_key:
+        user: ubuntu
+        key: "{{ lookup('file', '/home/vagrant/.ssh/id_rsa.pub') }}"
+        state: present
+
+# Second Play: Setting up vuecalc instances
+- hosts: vuecalc
+  gather_facts: true
+  remote_user: ubuntu
+  become: yes
+  become_method: sudo
+
+  tasks:
+    - name: Ensure no apt processes are running
+      shell: |
+        if ps aux | grep -i apt | grep -v grep; then
+          echo "Apt is running, waiting for it to finish..."
+          while ps aux | grep -i apt | grep -v grep; do sleep 1; done
+        fi
+      become: yes
+
+    - name: Remove dpkg lock files if they exist
+      file:
+        path: /var/lib/dpkg/lock-frontend
+        state: absent
+      become: yes
+
+    - name: Remove dpkg lock file
+      file:
+        path: /var/lib/dpkg/lock
+        state: absent
+      become: yes
+
+    - name: Configure dpkg if needed
+      command: dpkg --configure -a
+      become: yes
+      
+    # Install necessary packages, including Docker
+    - name: Ensure necessary packages are installed
+      apt:
+        name: 
+          - git
+          - curl
+          - nodejs
+          - npm
+          - apt-transport-https
+          - ca-certificates
+          - software-properties-common
+        state: present
+        update_cache: yes
+
+    - name: Add Docker’s official GPG key
+      shell: curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
+      become: yes
+
+    - name: Add Docker repository
+      shell: add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
+      become: yes
+
+    - name: Install Docker CE
+      apt:
+        name: docker-ce
+        state: latest
+        update_cache: yes
+      become: yes
+
+    # Ensure Docker service is started
+    - name: Ensure Docker is running
+      service:
+        name: docker
+        state: started
+        enabled: yes
+      become: yes
+
+    # Ensure the destination directory exists
+    - name: Create directory for vuecalc app if it doesn't exist
+      file:
+        path: /home/ubuntu/vuecalc
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: '0755'
+
+    # Copy the vuecalc app from the control node to the vuecalc instances
+    - name: Copy vuecalc app to the instances
+      synchronize:
+        src: /home/vagrant/agisit24-g9/agisit24-g9/app/vuecalc/
+        dest: /home/ubuntu/vuecalc/
+        recursive: yes
+      delegate_to: localhost
+
+    #Stop any existing containers using port 2000
+    - name: Stop existing containers using port 2000
+      shell: |
+        docker ps -q --filter "publish=2000" | xargs -r docker stop
+        docker ps -q --filter "publish=2000" | xargs -r docker rm
+      become: yes
+    
+    # Build and run the Docker container with sudo
+    - name: Build Docker image for vuecalc
+      shell: sudo docker build -t vuecalc /home/ubuntu/vuecalc
+      become: yes
+
+    - name: Run Docker container for vuecalc frontend
+      shell: sudo docker run -d -p 2000:2000 vuecalc
+      become: yes
+
+
+# Third Play: Setting up expressed instances
+- hosts: expressed
+  gather_facts: true
+  remote_user: ubuntu
+  become: yes
+  become_method: sudo
+
+  tasks:
+    # Install necessary packages, including Docker
+    - name: Ensure necessary packages are installed
+      apt:
+        name: 
+          - git
+          - curl
+          - nodejs
+          - npm
+          - apt-transport-https
+          - ca-certificates
+          - software-properties-common
+        state: present
+        update_cache: yes
+
+    # Ensure prom-client is installed (for prometheus)
+    - name: Install npm dependencies in expressed app
+      shell: npm install
+      args:
+        chdir: /home/ubuntu/expressed
+      become: yes
+
+    - name: Add Docker’s official GPG key
+      shell: curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
+      become: yes
+
+    - name: Add Docker repository
+      shell: add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
+      become: yes
+
+    - name: Install Docker CE
+      apt:
+        name: docker-ce
+        state: latest
+        update_cache: yes
+      become: yes
+
+    # Ensure Docker service is started
+    - name: Ensure Docker is running
+      service:
+        name: docker
+        state: started
+        enabled: yes
+      become: yes
+
+    # Ensure the destination directory exists
+    - name: Create directory for expressed app if it doesn't exist
+      file:
+        path: /home/ubuntu/expressed
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: '0755'
+
+    # Copy the expressed app from the control node to the expressed instances
+    - name: Copy expressed app to the instances
+      synchronize:
+        src: /home/vagrant/agisit24-g9/agisit24-g9/app/expressed/
+        dest: /home/ubuntu/expressed/
+        recursive: yes
+      delegate_to: localhost
+
+    #Stop any existing containers using port 3000
+    - name: Stop existing containers using port 3000
+      shell: |
+        docker ps -q --filter "publish=3000" | xargs -r docker stop
+        docker ps -q --filter "publish=3000" | xargs -r docker rm
+      become: yes
+    
+    # Build and run the Docker container with sudo
+    - name: Build Docker image for expressed
+      shell: sudo docker build -t expressed /home/ubuntu/expressed
+      become: yes
+
+    - name: Run Docker container for expressed
+      shell: sudo docker run -d -p 3000:3000 expressed
+      become: yes
+
+# Fourth Play: Setting up happy instances
+- hosts: happy
+  gather_facts: true
+  remote_user: ubuntu
+  become: yes
+  become_method: sudo
+
+  tasks:
+    # Install necessary packages, including Docker
+    - name: Ensure necessary packages are installed
+      apt:
+        name: 
+          - git
+          - curl
+          - nodejs
+          - npm
+          - apt-transport-https
+          - ca-certificates
+          - software-properties-common
+        state: present
+        update_cache: yes
+
+    # Ensure prom-client is installed (for prometheus)
+    - name: Install npm dependencies for Happy service
+      npm:
+        path: /home/ubuntu/happy
+        state: present
+
+    - name: Add Docker’s official GPG key
+      shell: curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
+      become: yes
+
+    - name: Add Docker repository
+      shell: add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
+      become: yes
+
+    - name: Install Docker CE
+      apt:
+        name: docker-ce
+        state: latest
+        update_cache: yes
+      become: yes
+
+    # Ensure Docker service is started
+    - name: Ensure Docker is running
+      service:
+        name: docker
+        state: started
+        enabled: yes
+      become: yes
+
+    # Ensure the destination directory exists
+    - name: Create directory for happy app if it doesn't exist
+      file:
+        path: /home/ubuntu/happy
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: '0755'
+
+    # Copy the happy app from the control node to the happy instances
+    - name: Copy happy app to the instances
+      synchronize:
+        src: /home/vagrant/agisit24-g9/agisit24-g9/app/happy/
+        dest: /home/ubuntu/happy/
+        recursive: yes
+      delegate_to: localhost
+
+    #Stop any existing containers using port 4000
+    - name: Stop existing containers using port 4000
+      shell: |
+        docker ps -q --filter "publish=4000" | xargs -r docker stop
+        docker ps -q --filter "publish=4000" | xargs -r docker rm
+      become: yes
+    
+    # Build and run the Docker container with sudo
+    - name: Build Docker image for happy
+      shell: sudo docker build -t happy /home/ubuntu/happy
+      become: yes
+
+    - name: Run Docker container for happy
+      shell: sudo docker run -d -p 4000:4000 happy
+      become: yes
+
+# Fifth Play: Setting up bootstorage instances and running Spring Boot app
+- hosts: bootstorage
+  gather_facts: true
+  remote_user: ubuntu
+  become: yes
+  become_method: sudo
+
+  tasks:
+    # Ensure necessary packages are installed
+    - name: Ensure necessary packages are installed
+      apt:
+        name: 
+          - git
+          - curl
+          - openjdk-8-jdk
+          - maven
+          - apt-transport-https
+          - ca-certificates
+          - software-properties-common
+        state: present
+        update_cache: yes
+
+    # Ensure proper ownership and permissions of the bootstorage directory
+    - name: Set correct permissions for the bootstorage directory
+      file:
+        path: /home/ubuntu/bootstorage
+        owner: ubuntu
+        group: ubuntu
+        mode: '0755'
+        recurse: yes
+
+    - name: Add Docker’s official GPG key
+      shell: curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
+      become: yes
+
+    - name: Add Docker repository
+      shell: add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
+      become: yes
+
+    - name: Install Docker CE
+      apt:
+        name: docker-ce
+        state: latest
+        update_cache: yes
+      become: yes
+    
+    # Ensure Docker service is started
+    - name: Ensure Docker is running
+      service:
+        name: docker
+        state: started
+        enabled: yes
+      become: yes
+
+    # Ensure the destination directory exists
+    - name: Create directory for bootstorage app if it doesn't exist
+      file:
+        path: /home/ubuntu/bootstorage
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: '0755'
+
+    # Copy the bootstorage app from the control node to the bootstorage instances
+    - name: Copy bootstorage app to the instances
+      synchronize:
+        src: /home/vagrant/agisit24-g9/agisit24-g9/app/bootstorage/
+        dest: /home/ubuntu/bootstorage/
+        recursive: yes
+      delegate_to: localhost
+
+    # Run Maven to package the Spring Boot application
+    - name: Run Maven package to build the Spring Boot app
+      shell: mvn package
+      args:
+        chdir: /home/ubuntu/bootstorage
+      become: yes
+      register: maven_build_result
+      ignore_errors: false
+
+    - name: Debug Maven build result
+      debug:
+        var: maven_build_result.stdout
+
+    # Stop any existing bootstorage Docker containers to avoid port conflicts
+    - name: Stop existing bootstorage container if running
+      shell: |
+        docker ps -q --filter "ancestor=bootstorage" | xargs -r docker stop
+        docker ps -q --filter "ancestor=bootstorage" | xargs -r docker rm
+      become: yes
+      ignore_errors: true
+
+    # Build Docker image for bootstorage
+    - name: Build Docker image for bootstorage
+      shell: docker build -t bootstorage .
+      args:
+        chdir: /home/ubuntu/bootstorage
+      become: yes
+      register: docker_build_result
+      ignore_errors: false
+
+    - name: Debug Docker build result
+      debug:
+        var: docker_build_result.stdout
+    
+    # Run Docker container for bootstorage
+    - name: Run Docker container for bootstorage
+      shell: sudo docker run -d -p 5000:5000 bootstorage
+      become: yes
+
+
+# Sixth Play: Setting up mongodb instance
+- hosts: mongodb
+  gather_facts: true
+  remote_user: ubuntu
+  become: yes
+  become_method: sudo
+
+  tasks:
+    # Install MongoDB
+    - name: Install MongoDB
+      apt:
+        name: mongodb
+        state: present
+        update_cache: yes
+
+    # Ensure MongoDB service is started
+    - name: Ensure MongoDB is running
+      service:
+        name: mongodb
+        state: started
+        enabled: yes
+      become: yes
+
+
+# Seventh Play: Load Balancer Setup (HAProxy)
+- hosts: loadbal
+  gather_facts: true
+  remote_user: ubuntu
+  become: yes
+  become_method: sudo
+
+  tasks:
+    # Update /etc/hosts for name resolution of self (load balancer)
+    - name: update /etc/hosts file for name resolution of self
+      lineinfile:
+        dest: /etc/hosts
+        regexp: '.*{{ item }}$'
+        line: "127.0.0.1 {{item}}"
+        state: present
+      with_items:
+        - balancer
+
+    # Update /etc/hosts file for name resolution of backend instances (expressed and happy)
+    - name: update /etc/hosts file for name resolution of backend instances
+      lineinfile:
+        dest: /etc/hosts
+        regexp: '.*{{ item }}$'
+        line: "{{ hostvars[item]['ansible_default_ipv4']['address'] }} {{item}}"
+        state: present
+      when: hostvars[item]['ansible_default_ipv4']['address'] is defined
+      with_items:
+        - expressed1
+        - expressed2
+        - happy1
+        - happy2
+
+    # Add HAProxy repository
+    - name: add HAProxy repository
+      apt_repository:
+        repo: ppa:vbernat/haproxy-2.1
+        update_cache: true
+
+    # Install HAProxy and socat
+    - name: install haproxy and socat
+      apt:
+        pkg: ['haproxy', 'socat']
+        state: latest
+
+    # Enable HAProxy
+    - name: enable haproxy
+      lineinfile:
+        path: /etc/default/haproxy
+        regexp: "^ENABLED.+$"
+        line: "ENABLED=1"
+        state: present
+
+    # Deploy HAProxy configuration
+    - name: deploy haproxy config
+      template:
+        src: /home/vagrant/agisit24-g9/agisit24-g9/gcpcloud/templates/haproxy.cfg.j2 
+        dest: /etc/haproxy/haproxy.cfg
+        mode: 0644
+        validate: haproxy -f %s -c -q  # Validate the configuration before deploying
+      notify: restart haproxy
+
+    # Ensure HAProxy is started and enabled on boot
+    - name: Ensure HAProxy is started and enabled on boot
+      service:
+        name: haproxy
+        state: started
+        enabled: yes
+
+  handlers:
+    - name: restart haproxy
+      service:
+        name: haproxy
+        state: restarted
+
+
+# Eighth Play: Setting up Prometheus instance
+- hosts: prometheus
+  gather_facts: true
+  remote_user: ubuntu
+  become: yes
+  become_method: sudo
+
+  tasks:
+    # Ensure necessary packages are installed
+    - name: Ensure necessary packages are installed
+      apt:
+        name: 
+          - wget
+          - tar
+          - npm
+        state: present
+        update_cache: yes
+
+    # Download Prometheus
+    - name: Download Prometheus
+      shell: wget https://github.com/prometheus/prometheus/releases/download/v2.44.0/prometheus-2.44.0.linux-amd64.tar.gz
+      args:
+        chdir: /tmp
+
+    # Extract Prometheus package
+    - name: Extract Prometheus package
+      shell: tar -xzf prometheus-2.44.0.linux-amd64.tar.gz
+      args:
+        chdir: /tmp
+
+    - name: Remove existing Prometheus directory if it exists
+      file:
+        path: /usr/local/prometheus
+        state: absent
+        force: yes
+
+    - name: Move Prometheus files to /usr/local/prometheus
+      shell: sudo mv /tmp/prometheus-2.44.0.linux-amd64 /usr/local/prometheus
+
+    - name: Create symbolic links for Prometheus binaries
+      file:
+        src: /usr/local/prometheus/prometheus
+        dest: /usr/local/bin/prometheus
+        state: link
+        force: yes
+
+    - name: Create symbolic link for Promtool
+      file:
+        src: /usr/local/prometheus/promtool
+        dest: /usr/local/bin/promtool
+        state: link
+        force: yes
+
+    # Create Prometheus user
+    - name: Create Prometheus user
+      user:
+        name: prometheus
+        shell: /bin/false
+        create_home: no
+
+    # Create Prometheus directories
+    - name: Create Prometheus directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: prometheus
+        group: prometheus
+      with_items:
+        - /etc/prometheus
+        - /var/lib/prometheus
+
+    # Copy Prometheus configuration file from repo to VM
+    - name: Copy Prometheus configuration file
+      copy:
+        src: /home/vagrant/agisit24-g9/agisit24-g9/app/prometheus/prometheus.yml
+        dest: /etc/prometheus/prometheus.yml
+        owner: prometheus
+        group: prometheus
+        mode: '0644'
+
+    # Copy Prometheus systemd service file from repo to VM
+    - name: Copy Prometheus systemd service file
+      copy:
+        src: /home/vagrant/agisit24-g9/agisit24-g9/app/prometheus/prometheus.service
+        dest: /etc/systemd/system/prometheus.service
+        mode: '0644'
+
+    # Reload systemd and start Prometheus service
+    - name: Reload systemd
+      shell: sudo systemctl daemon-reload
+
+    - name: Start Prometheus service
+      service:
+        name: prometheus
+        state: started
+        enabled: yes
+
+    # Restart Prometheus service
+    - name: Restart Prometheus service
+      service:
+        name: prometheus
+        state: restarted
